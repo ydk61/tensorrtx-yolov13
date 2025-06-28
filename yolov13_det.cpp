@@ -154,8 +154,6 @@ bool parse_args(int argc, char** argv, std::string& wts, std::string& engine, st
 }
 
 int main(int argc, char** argv) {
-    // yolo13-det -s ../models/yolo12n.wts ../models/yolo12n.fp32.trt n
-    // yolo13-det -d ../models/yolo12n.fp32.trt ../images c
     cudaSetDevice(kGpuId);
     std::string wts_name;
     std::string engine_name;
@@ -168,10 +166,10 @@ int main(int argc, char** argv) {
 
     if (!parse_args(argc, argv, wts_name, engine_name, img_dir, type, cuda_post_process, gd, gw, max_channels)) {
         std::cerr << "Arguments not right!" << std::endl;
-        std::cerr << "./yolo12_det -s [.wts] [.engine] [n/s//l/x]  // serialize model to "
+        std::cerr << "./yolov13-det -s [.wts] [.engine] [n/s/l/x]  // serialize model to "
                      "plan file"
                   << std::endl;
-        std::cerr << "./yolo12_det -d [.engine] ../images  [c/g]// deserialize plan file and run inference"
+        std::cerr << "./yolov13-det -d [.engine] ../images  [c/g]// deserialize plan file and run inference"
                   << std::endl;
         return -1;
     }
