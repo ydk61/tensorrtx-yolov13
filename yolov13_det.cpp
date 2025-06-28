@@ -154,8 +154,8 @@ bool parse_args(int argc, char** argv, std::string& wts, std::string& engine, st
 }
 
 int main(int argc, char** argv) {
-    // yolo12_det -s ../models/yolo12n.wts ../models/yolo12n.fp32.trt n
-    // yolo12_det -d ../models/yolo12n.fp32.trt ../images c
+    // yolo13-det -s ../models/yolo12n.wts ../models/yolo12n.fp32.trt n
+    // yolo13-det -d ../models/yolo12n.fp32.trt ../images c
     cudaSetDevice(kGpuId);
     std::string wts_name;
     std::string engine_name;
