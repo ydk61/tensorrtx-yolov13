@@ -442,79 +442,93 @@ nvinfer1::ILayer* FuseModule(nvinfer1::INetworkDefinition* network, std::map<std
     
 }
 
-nvinfer1::ISoftMaxLayer* AdaHyperedgeGen(nvinfer1::INetworkDefinition* network,
-                                         std::map<std::string, nvinfer1::Weights> weightMap, nvinfer1::ITensor& input,
-                                         int node_dim, int num_hyperedges, std::string lname, int num_heads,
-                                         std::string context) {
+nvinfer1::ISoftMaxLayer *AdaHyperedgeGen(nvinfer1::INetworkDefinition *network, std::map<std::string, nvinfer1::Weights> weightMap, 
+      nvinfer1::ITensor &input, int node_dim, int num_hyperedges, std::string lname, int num_heads,
+                                         std::string context){
+
+    nvinfer1::Dims dim_input = input.getDimensions();
+    int B = dim_input.d[0];
+    int N = dim_input.d[1];
+    int D = dim_input.d[2];
     int head_dim = node_dim / num_heads;
-    nvinfer1::Dims dim = input.getDimensions();
-    int B = dim.d[0];
-    int N = dim.d[1];
-    int D = dim.d[2];
-    nvinfer1::ITensor* context_cat = nullptr;
-    if (context == "mean") {
-        nvinfer1::IReduceLayer* t_mean = network->addReduce(input, nvinfer1::ReduceOperation::kAVG, 1 << 1, false);
-        context_cat = t_mean->getOutput(0);
-    } else if (context == "max") {
-        nvinfer1::IReduceLayer* t_max = network->addReduce(input, nvinfer1::ReduceOperation::kMAX, 1 << 1, false);
-        context_cat = t_max->getOutput(0);
-    } else {
-        nvinfer1::IReduceLayer* t_mean = network->addReduce(input, nvinfer1::ReduceOperation::kAVG, 1 << 1, false);
-        /*std::cout << "t_mean's shape:" << endl;
-        cout_dim(*t_mean->getOutput(0));*/
-        nvinfer1::IReduceLayer* t_max = network->addReduce(input, nvinfer1::ReduceOperation::kMAX, 1 << 1, false);
-        nvinfer1::ITensor* inputTensor[] = {t_mean->getOutput(0), t_max->getOutput(0)};
-        nvinfer1::IConcatenationLayer* cat = network->addConcatenation(inputTensor, 2);// both 2 dimensions
-        cat->setAxis(1<<0); // fixed!!!!!!!!!!!!!!!!!!!!
+    nvinfer1::ITensor *context_cat = nullptr;
+    if(context == "mean"){
+        nvinfer1::IReduceLayer *context_mean = network->addReduce(input, nvinfer1::ReduceOperation::kAVG, 1 << 1, false);
+        context_cat = context_mean->getOutput(0);
+    }else if(context == "max"){
+        nvinfer1::IReduceLayer *context_max= network->addReduce(input, nvinfer1::ReduceOperation::kMAX, 1 << 1, false);
+        context_cat = context_max->getOutput(0);
+    }else{
+        nvinfer1::IReduceLayer *context_mean = network->addReduce(input, nvinfer1::ReduceOperation::kAVG, 1 << 1, false);
+        nvinfer1::IReduceLayer *context_max= network->addReduce(input, nvinfer1::ReduceOperation::kMAX, 1 << 1, false);
+        nvinfer1::ITensor *inputTensor[] = {context_mean->getOutput(0), context_max->getOutput(0)};
+        nvinfer1::IConcatenationLayer *cat = network->addConcatenation(inputTensor, 2);
+        cat->setAxis( 1 << 0);
         context_cat = cat->getOutput(0);
     }
-    nvinfer1::IShuffleLayer* context_cat_dim4 = network->addShuffle(*context_cat);
-    context_cat_dim4->setReshapeDimensions(nvinfer1::Dims4{B, context_cat->getDimensions().d[1], 1, 1});
-    nvinfer1::IFullyConnectedLayer* context_net = network->addFullyConnected(*context_cat_dim4->getOutput(0), num_hyperedges * node_dim,
-                                                                             weightMap[lname + ".context_net.weight"],
-                                                                             weightMap[lname + ".context_net.bias"]);
-    nvinfer1::IShuffleLayer* context_net_view = network->addShuffle(*context_net->getOutput(0));
-    context_net_view->setReshapeDimensions(nvinfer1::Dims3{B, num_hyperedges, D});
-    nvinfer1::Weights prototype_base = weightMap[lname + ".prototype_base"];
-    nvinfer1::IConstantLayer* prototype_base_ =
-            network->addConstant(nvinfer1::Dims3{1, num_hyperedges, node_dim}, prototype_base);
-    nvinfer1::IElementWiseLayer* prototypes = network->addElementWise(
-            *prototype_base_->getOutput(0), *context_net_view->getOutput(0), nvinfer1::ElementWiseOperation::kSUM);
 
-    nvinfer1::IShuffleLayer* input_4d = network->addShuffle(input);
-    input_4d->setReshapeDimensions(nvinfer1::Dims4{B * N, 1, 1, D});
-    nvinfer1::IFullyConnectedLayer* x_proj = network->addFullyConnected(
-            *input_4d->getOutput(0), node_dim, weightMap[lname + ".pre_head_proj.weight"], weightMap[lname + ".pre_head_proj.bias"]);
-    
-    nvinfer1::IShuffleLayer* x_heads = network->addShuffle(*x_proj->getOutput(0));
-    x_heads->setReshapeDimensions(nvinfer1::Dims4{B, N, num_heads, head_dim});
-    x_heads->setSecondTranspose(nvinfer1::Permutation{0, 2, 1, 3});
+    nvinfer1::IShuffleLayer *context_cat_dim4 = network->addShuffle(*context_cat);
+    context_cat_dim4->setReshapeDimensions(nvinfer1::Dims4{context_cat->getDimensions().d[0],
+                                                           context_cat->getDimensions().d[1],
+                                                           1, 1});
+    nvinfer1::IFullyConnectedLayer *prototypes_offsets_ = network->addFullyConnected(*context_cat_dim4->getOutput(0),
+              num_hyperedges * node_dim, weightMap[lname + ".context_net.weight"], weightMap[lname + ".context_net.bias"]);
+    nvinfer1::IShuffleLayer *prototypes_offsets = network->addShuffle(*prototypes_offsets_->getOutput(0));
+    prototypes_offsets->setReshapeDimensions(nvinfer1::Dims3{B, num_hyperedges, D});
+    // prototype_offsets = self.context_net(context_cat).view(B, self.num_hyperedges, D)  
 
-    nvinfer1::IShuffleLayer* proto_heads = network->addShuffle(*prototypes->getOutput(0));
+    nvinfer1::Weights prototype_base_wts = weightMap[lname + ".prototype_base"];
+    nvinfer1::IConstantLayer *prototype_base = network->addConstant(
+        nvinfer1::Dims3{1, num_hyperedges, node_dim}, prototype_base_wts);
+    nvinfer1::IElementWiseLayer *prototypes = network->addElementWise(*prototype_base->getOutput(0), 
+                                                                      *prototypes_offsets->getOutput(0),
+                                                                      nvinfer1::ElementWiseOperation::kSUM);
+    // prototypes = self.prototype_base.unsqueeze(0) + prototype_offsets
+
+    nvinfer1::IShuffleLayer *input_dim4 = network->addShuffle(input);
+    input_dim4->setReshapeDimensions(nvinfer1::Dims4{B * N, D, 1, 1 });
+    nvinfer1::IFullyConnectedLayer *X_proj = network->addFullyConnected(*input_dim4->getOutput(0), node_dim,
+                                                   weightMap[lname + ".pre_head_proj.weight"], weightMap[lname + ".pre_head_proj.bias"]);
+    // X_proj = self.pre_head_proj(X) 
+
+    nvinfer1::IShuffleLayer *X_heads = network->addShuffle(*X_proj->getOutput(0));
+    X_heads->setReshapeDimensions(nvinfer1::Dims4{B, N, num_heads, head_dim});
+    X_heads->setSecondTranspose(nvinfer1::Permutation{0, 2, 1, 3});
+    // X_heads = X_proj.view(B, N, self.num_heads, self.head_dim).transpose(1, 2)
+
+    nvinfer1::IShuffleLayer *proto_heads = network->addShuffle(*prototypes->getOutput(0));
     proto_heads->setReshapeDimensions(nvinfer1::Dims4{B, num_hyperedges, num_heads, head_dim});
     proto_heads->setSecondTranspose(nvinfer1::Permutation{0, 2, 1, 3});
+    // proto_heads = prototypes.view(B, self.num_hyperedges, self.num_heads, self.head_dim).permute(0, 2, 1, 3)
 
-    nvinfer1::IShuffleLayer* x_heads_flat = network->addShuffle(*x_heads->getOutput(0));
-    x_heads_flat->setReshapeDimensions(nvinfer1::Dims3{B * num_heads, N, head_dim});
-    nvinfer1::IShuffleLayer* proto_heads_flat = network->addShuffle(*proto_heads->getOutput(0));
+    nvinfer1::IShuffleLayer *X_heads_flat = network->addShuffle(*X_heads->getOutput(0));
+    X_heads_flat->setReshapeDimensions(nvinfer1::Dims3{B * num_heads, N, head_dim});
+    // X_heads_flat = X_heads.reshape(B * self.num_heads, N, self.head_dim)
+
+    nvinfer1::IShuffleLayer *proto_heads_flat = network->addShuffle(*proto_heads->getOutput(0));
     proto_heads_flat->setReshapeDimensions(nvinfer1::Dims3{B * num_heads, num_hyperedges, head_dim});
     proto_heads_flat->setSecondTranspose(nvinfer1::Permutation{0, 2, 1});
-    nvinfer1::IMatrixMultiplyLayer* logits =
-            network->addMatrixMultiply(*x_heads_flat->getOutput(0), nvinfer1::MatrixOperation::kNONE,
-                                       *proto_heads_flat->getOutput(0), nvinfer1::MatrixOperation::kNONE);
-    float scale = sqrt(head_dim);
-    nvinfer1::Weights scaleWeights{nvinfer1::DataType::kFLOAT, &scale, 1};
-    nvinfer1::IConstantLayer* scaleLayer = network->addConstant(nvinfer1::Dims3{1,1,1}, scaleWeights);
-    nvinfer1::IElementWiseLayer* logits_scaled = network->addElementWise(
-            *logits->getOutput(0), *scaleLayer->getOutput(0), nvinfer1::ElementWiseOperation::kDIV);
-    nvinfer1::IShuffleLayer* logits_scaled_view = network->addShuffle(*logits_scaled->getOutput(0));
-    logits_scaled_view->setReshapeDimensions(nvinfer1::Dims4{B, num_heads, N, num_hyperedges});
+    //proto_heads_flat = proto_heads.reshape(B * self.num_heads, self.num_hyperedges, self.head_dim).transpose(1, 2)
 
-    // {B, N, num_hyperedges}
-    nvinfer1::IReduceLayer* logits_scaled_view_mean =
-            network->addReduce(*logits_scaled_view->getOutput(0), nvinfer1::ReduceOperation::kAVG, 1 << 1, false);
-    nvinfer1::ISoftMaxLayer* softmax = network->addSoftMax(*logits_scaled_view_mean->getOutput(0));
+    nvinfer1::IMatrixMultiplyLayer *logits = network->addMatrixMultiply(*X_heads_flat->getOutput(0), nvinfer1::MatrixOperation::kNONE,
+                                                     *proto_heads_flat->getOutput(0), nvinfer1::MatrixOperation::kNONE);
+    float scales = sqrt(head_dim);
+    nvinfer1::Weights scale_wts{nvinfer1::DataType::kFLOAT, &scales, 1};
+    nvinfer1::IConstantLayer *scale_layer = network->addConstant(nvinfer1::Dims3{1, 1, 1}, scale_wts);
+    nvinfer1::IElementWiseLayer *logits_scale = network->addElementWise(*logits->getOutput(0), *scale_layer->getOutput(0),
+          nvinfer1::ElementWiseOperation::kDIV);
+    // logits = torch.bmm(X_heads_flat, proto_heads_flat) / self.scaling 
+
+    nvinfer1::IShuffleLayer *logits_scale_view = network->addShuffle(*logits_scale->getOutput(0));
+    logits_scale_view->setReshapeDimensions(nvinfer1::Dims4{B, num_heads, N, num_hyperedges});
+    nvinfer1::IReduceLayer *logits_scale_view_mean = 
+        network->addReduce(*logits_scale_view->getOutput(0), nvinfer1::ReduceOperation::kAVG,
+                             1 << 1, false);
+
+
+    nvinfer1::ISoftMaxLayer *softmax = network->addSoftMax(*logits_scale_view_mean->getOutput(0));
     softmax->setAxes(1 << 1);
+    
     return softmax;
 }
 
