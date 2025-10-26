@@ -63,6 +63,7 @@ cp [PATH-TO-ultralytics]/yolov13n.wts .
 ```
 
 ## INT8 Quantization
+# ========================================= 个人3050Ti 失败 =====================================================================
 1. Prepare calibration images, you can randomly select 1000s images from your train set.
      For coco, you can also download my calibration images `coco_calib` from 
      [GoogleDrive](https://drive.google.com/drive/folders/1s7jE9DtOngZMzJC1uL307J2MiaGwdRSI?usp=sharing) 
@@ -80,10 +81,17 @@ activation_8(47): error: identifier "inff" is undefined
 Build engine successfully!
 Assertion failed: serialized_engine, file E:\tensorrtx-master\yolov13\yolov13_det.cpp, line 23
 
+# ========================================= 个人4060成功 =====================================================================
+input->['images-2/img_17.jpg'], time->106.42ms, saving into output/
+input->['images-2/4.jpg'], time->4.15ms, saving into output/
+input->['images-2/1.jpg'], time->4.89ms, saving into output/
+input->['images-2/img_52.jpg'], time->4.11ms, saving into output/
+input->['images-2/bus.jpg'], time->4.14ms, saving into output/
+input->['images-2/zidane.jpg'], time->4.77ms, saving into output/
+input->['images-2/2.jpg'], time->4.13ms, saving into output/
+input->['images-2/3.jpg'], time->4.75ms, saving into output/
 
-
-
-
+<img width="1062" height="840" alt="image" src="https://github.com/user-attachments/assets/41944c33-e404-4442-8a3e-3231212232b9" />
 
 
 
