@@ -6,7 +6,6 @@
 #include "config.h"
 #include "model.h"
 
-
 static int get_width(int x, float gw, int max_channels, int divisor = 8) {
     auto channel = std::min(x, max_channels);
     channel = int(ceil((channel * gw) / divisor)) * divisor;
@@ -28,7 +27,7 @@ static nvinfer1::IElementWiseLayer* convBnSiLUProto(nvinfer1::INetworkDefinition
     nvinfer1::Weights bias_empty{nvinfer1::DataType::kFLOAT, nullptr, 0};
     nvinfer1::IConvolutionLayer* conv =
             network->addConvolutionNd(input, ch, nvinfer1::DimsHW{k, k}, weightMap[lname + ".conv.weight"], bias_empty);
-    
+
     conv->setStrideNd(nvinfer1::DimsHW{s, s});
     conv->setPaddingNd(nvinfer1::DimsHW{p, p});
     conv->setName((lname + ".conv").c_str());
@@ -71,15 +70,14 @@ static nvinfer1::IElementWiseLayer* Proto(nvinfer1::INetworkDefinition* network,
     //    float *convTranpsose_bais = (float *) weightMap["model.23.proto.upsample.bias"].values;
     //    int convTranpsose_bais_len = weightMap["model.23.proto.upsample.bias"].count;
     //    nvinfer1::Weights bias{nvinfer1::DataType::kFLOAT, convTranpsose_bais, convTranpsose_bais_len};
-    auto convTranpsose = network->addDeconvolutionNd(*cv1->getOutput(0), mid_channel, nvinfer1::DimsHW{2, 2},
-                                                     weightMap[lname + ".upsample.weight"],
-                                                     weightMap[lname + ".upsample.bias"]);
+    auto convTranpsose =
+            network->addDeconvolutionNd(*cv1->getOutput(0), mid_channel, nvinfer1::DimsHW{2, 2},
+                                        weightMap[lname + ".upsample.weight"], weightMap[lname + ".upsample.bias"]);
 
     assert(convTranpsose);
     convTranpsose->setStrideNd(nvinfer1::DimsHW{2, 2});
     convTranpsose->setPadding(nvinfer1::DimsHW{0, 0});
-    auto cv2 =
-            convBnSiLU(network, weightMap, *convTranpsose->getOutput(0), mid_channel, {3, 3}, 1, lname + ".cv2");
+    auto cv2 = convBnSiLU(network, weightMap, *convTranpsose->getOutput(0), mid_channel, {3, 3}, 1, lname + ".cv2");
     auto cv3 = convBnSiLUProto(network, weightMap, *cv2->getOutput(0), 32, 1, 1, 0, lname + ".cv3");
     assert(cv3);
     return cv3;
@@ -114,7 +112,6 @@ static nvinfer1::IShuffleLayer* cv4_conv_combined(nvinfer1::INetworkDefinition* 
     return cv2_shuffle;
 }
 
-
 void calculateStrides(nvinfer1::IElementWiseLayer* conv_layers[], int size, int reference_size, int strides[]) {
     for (int i = 0; i < size; ++i) {
         nvinfer1::ILayer* layer = conv_layers[i];
@@ -137,6 +134,7 @@ nvinfer1::IHostMemory* buildEngineYolov13Det(nvinfer1::IBuilder* builder, nvinfe
                                              nvinfer1::DataType dt, const std::string& wts_path, float& gd, float& gw,
                                              int& max_channels, std::string& type) {
 
+    std::cout << "The number of the KNumClass is " << kNumClass << std::endl;
     std::map<std::string, nvinfer1::Weights> weightMap = loadWeights(wts_path);
     nvinfer1::INetworkDefinition* network = builder->createNetworkV2(
             1U << static_cast<uint32_t>(nvinfer1::NetworkDefinitionCreationFlag::kEXPLICIT_BATCH));
@@ -147,7 +145,8 @@ nvinfer1::IHostMemory* buildEngineYolov13Det(nvinfer1::IBuilder* builder, nvinfe
 
     // =====================   backbone   ===================================================
     nvinfer1::ILayer* conv0 = Conv(network, weightMap, *data, get_width(64, gw, max_channels), "model.0", 3, 2);
-    nvinfer1::ILayer* conv1 = Conv(network, weightMap, *conv0->getOutput(0), get_width(128, gw, max_channels), "model.1", 3, 2, 1, 2);
+    nvinfer1::ILayer* conv1 =
+            Conv(network, weightMap, *conv0->getOutput(0), get_width(128, gw, max_channels), "model.1", 3, 2, 1, 2);
 
     bool dsc3k = false;
     float mlp_ratio = 2.0;
@@ -159,19 +158,20 @@ nvinfer1::IHostMemory* buildEngineYolov13Det(nvinfer1::IBuilder* builder, nvinfe
         dsc3k = true;
         channel_adjust = false;
     }
-    nvinfer1::ILayer* conv2 = DSC3K2(network, weightMap, *conv1->getOutput(0), get_width(256, gw, max_channels), 
-                                                   "model.2", get_depth(2, gd), dsc3k, 0.25);
+    nvinfer1::ILayer* conv2 = DSC3K2(network, weightMap, *conv1->getOutput(0), get_width(256, gw, max_channels),
+                                     "model.2", get_depth(2, gd), dsc3k, 0.25);
     nvinfer1::IElementWiseLayer* conv3 = convBnSiLU(network, weightMap, *conv2->getOutput(0),
                                                     get_width(256, gw, max_channels), {3, 3}, 2, "model.3", 1, 4);
     nvinfer1::ILayer* conv4 = DSC3K2(network, weightMap, *conv3->getOutput(0), get_width(512, gw, max_channels),
-                                        "model.4", get_depth(2, gd), dsc3k, 0.25);
+                                     "model.4", get_depth(2, gd), dsc3k, 0.25);
     nvinfer1::IElementWiseLayer* conv5 =
-            DSConv(network, weightMap, *conv4->getOutput(0), get_width(512, gw, max_channels), 
-                                       get_width(512, gw, max_channels), "model.5", 3, 2);
+            DSConv(network, weightMap, *conv4->getOutput(0), get_width(512, gw, max_channels),
+                   get_width(512, gw, max_channels), "model.5", 3, 2);
     nvinfer1::ILayer* conv6 = A2C2f(network, weightMap, *conv5->getOutput(0), get_width(512, gw, max_channels),
                                     get_depth(4, gd), "model.6", true, 4, residual, mlp_ratio);
-    nvinfer1::IElementWiseLayer* conv7 = DSConv(network, weightMap, *conv6->getOutput(0), get_width(512, gw, max_channels),
-                          get_width(1024, gw, max_channels), "model.7", 3, 2);
+    nvinfer1::IElementWiseLayer* conv7 =
+            DSConv(network, weightMap, *conv6->getOutput(0), get_width(512, gw, max_channels),
+                   get_width(1024, gw, max_channels), "model.7", 3, 2);
 
     nvinfer1::ILayer* conv8 = A2C2f(network, weightMap, *conv7->getOutput(0), get_width(1024, gw, max_channels),
                                     get_depth(4, gd), "model.8", true, 1, residual, mlp_ratio);
@@ -190,14 +190,15 @@ nvinfer1::IHostMemory* buildEngineYolov13Det(nvinfer1::IBuilder* builder, nvinfe
                      get_width(512, gw, max_channels), get_width(512, gw, max_channels), "model.9", get_depth(2, gd),
                      num_hyperedges, true, true, 0.5, 1, "both", channel_adjust);
 
+    auto input_dims = conv9->getOutput(0)->getDimensions();
     nvinfer1::IResizeLayer* upsample10 = network->addResize(*conv9->getOutput(0));
     assert(upsample10);
     upsample10->setResizeMode(nvinfer1::ResizeMode::kNEAREST);
-    upsample10->setScales(scale, 4);
+    upsample10->setOutputDimensions(
+            nvinfer1::Dims4{input_dims.d[0], input_dims.d[1], input_dims.d[2] * 2, input_dims.d[3] * 2});
 
     nvinfer1::ILayer* downsample11 = DownsampleConv(network, weightMap, *conv9->getOutput(0),
                                                     get_width(512, gw, max_channels), "model.11", channel_adjust);
-
 
     nvinfer1::IElementWiseLayer* conv12 =  // conv6:(1, 128, 40, 40) conv9: (1, 128, 40, 40)
             FullPad_Tunnel(network, weightMap, {conv6->getOutput(0), conv9->getOutput(0)}, "model.12");
@@ -206,7 +207,6 @@ nvinfer1::IHostMemory* buildEngineYolov13Det(nvinfer1::IBuilder* builder, nvinfe
 
     nvinfer1::IElementWiseLayer* conv14 =
             FullPad_Tunnel(network, weightMap, {conv8->getOutput(0), downsample11->getOutput(0)}, "model.14");
-
 
     nvinfer1::IResizeLayer* upsample15 = network->addResize(*conv14->getOutput(0));
     assert(upsample15);
@@ -229,7 +229,6 @@ nvinfer1::IHostMemory* buildEngineYolov13Det(nvinfer1::IBuilder* builder, nvinfe
     nvinfer1::ILayer* conv21 = DSC3K2(network, weightMap, *cat20->getOutput(0), get_width(256, gw, max_channels),
                                       "model.21", get_depth(2, gd), true);
 
-
     nvinfer1::ILayer* conv22 =
             Conv(network, weightMap, *upsample10->getOutput(0), get_width(256, gw, max_channels), "model.22");
     nvinfer1::IElementWiseLayer* conv23 =
@@ -244,7 +243,6 @@ nvinfer1::IHostMemory* buildEngineYolov13Det(nvinfer1::IBuilder* builder, nvinfe
     nvinfer1::IElementWiseLayer* conv27 =
             FullPad_Tunnel(network, weightMap, {conv26->getOutput(0), conv9->getOutput(0)}, "model.27");
 
-
     nvinfer1::ILayer* conv28 =
             Conv(network, weightMap, *conv26->getOutput(0), get_width(512, gw, max_channels), "model.28", 3, 2);
     nvinfer1::ITensor* inputTensors29[] = {conv28->getOutput(0), conv14->getOutput(0)};
@@ -253,7 +251,6 @@ nvinfer1::IHostMemory* buildEngineYolov13Det(nvinfer1::IBuilder* builder, nvinfe
                                       "model.30", get_depth(2, gd), true);
     nvinfer1::IElementWiseLayer* conv31 =
             FullPad_Tunnel(network, weightMap, {conv30->getOutput(0), downsample11->getOutput(0)}, "model.31");
-
 
     // =============================== output ===================================================================
     int c2 = std::max(std::max(16, get_width(256, gw, max_channels) / 4), 16 * 4);
@@ -435,5 +432,3 @@ nvinfer1::IHostMemory* buildEngineYolov13Det(nvinfer1::IBuilder* builder, nvinfe
     }
     return serialized_model;
 }
-
-
